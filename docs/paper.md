@@ -49,7 +49,9 @@ with very different baselines and traffic scales.
 
 **Date windows:** two independent 28-day feature windows, each paired with
 its own following 28-day label window. The two train/test blocks are
-sequential and non-overlapping in time.
+sequential and non-overlapping in time. This gives a single held-out test
+block rather than multiple time-based folds — see Limitations for what that
+means for the reported scores.
 
 **Exclusions:**
 - Rows where `gsc_data_available = false`.
@@ -72,6 +74,11 @@ into:
 - **declining** — relative click slope < −0.02
 - **review** — everything else, including high-volatility and missing-trend
   cases
+
+The ±0.02 cutoff was chosen as a round, readable number rather than tuned
+against a validation set or swept for sensitivity — a different threshold
+would shift class balance and the reported scores, and that sensitivity
+hasn't been measured yet.
 
 *A planned fourth "recovering" class produced zero training examples at a
 workable threshold and was folded into "review" — a limitation of the
@@ -97,14 +104,19 @@ test set's own label distribution, which is circular; that was corrected
 before reporting the numbers below.)
 
 **Model.** Random Forest, 300 trees, max depth 8, class-weighted,
-`random_state=42`.
+`random_state=42`. These hyperparameters were set directly rather than
+swept via a validation search — a lightweight grid/random search on the
+train block alone is a natural next step and could move the reported
+numbers in either direction.
 
 **Validation design — time-aware split.** Two sequential, non-overlapping
 time blocks: a train block (28-day feature window + its own 28-day label
 window), followed by a test block whose feature window begins only *after*
 the train block's label window ends. This was deliberately chosen over a
 random shuffle/K-fold split, which would let the model see future-window
-information during training and inflate the reported score.
+information during training and inflate the reported score. It is still a
+single split, so the scores below should be read as one observation rather
+than a stable estimate — see Limitations.
 
 **Leakage checks.** Feature windows never overlap their own or any later
 label window. The label's underlying click slope is computed on a date range
@@ -131,6 +143,11 @@ Relative improvement over baseline: **~83%**.
 | growing | 0.34 | 0.65 | 0.45 | 834 |
 | review | 0.60 | 0.42 | 0.49 | 1314 |
 
+Most of the baseline's 0.208 already comes from correctly predicting the
+majority `review` class for every item; the model's gain over baseline is
+concentrated in the `growing` and `declining` classes, which the baseline
+scores zero on by construction.
+
 **Feature importance:** `avg_position_mean` and `avg_position_volatility`
 dominate by a wide margin. CTR trend and static content attributes (search
 volume, word count, competition, backlinks) contribute only secondary
@@ -144,10 +161,21 @@ signal.
 
 - **Directional signal, not a precise or causal forecast.** F1-macro of
   0.380 means meaningfully better than guessing, not highly accurate.
+- **Single train/test split, no variance estimate.** All scores above come
+  from one time-based split rather than multiple rolling splits, so there's
+  no confidence interval — the true variability of these numbers across
+  different 28-day windows is unmeasured.
 - **Declining pages are hardest to catch:** recall of 0.15 means most true
-  declines are missed by this model.
+  declines are missed by this model. For the model's core use case —
+  surfacing pages before they slip — this is the most important gap, not
+  just a caveat, and a simple rule-based slope trigger may currently
+  outperform the model specifically on this class.
 - **Growing pages are over-flagged:** precision of 0.34 means roughly
   two-thirds of "growing" flags are wrong.
+- **Label threshold and model hyperparameters were set, not tuned.** The
+  ±0.02 labeling cutoff and the Random Forest's settings (300 trees, depth
+  8) were chosen directly rather than swept on a validation set, so their
+  sensitivity is untested.
 - **Single-client scope.** Results reflect one client's traffic dynamics and
   are not claimed to generalize to other clients without re-validation.
 - **No causal claims.** All findings are correlational and say nothing about
@@ -176,6 +204,9 @@ signal.
 5. **Re-validate on any new client's own data before extending** — these
    exact thresholds reflect a single client's traffic scale and content
    strategy only.
+6. **Before further use, run a rolling-window backtest and a small
+   hyperparameter/threshold sweep** to get a variance estimate on the
+   reported scores rather than relying on the single split above.
 
 ---
 
